@@ -5,4 +5,4 @@ all: ${binary}
 
 .PHONY:
 clean:
-	rm ${binary}
+	-rm ${binary}
