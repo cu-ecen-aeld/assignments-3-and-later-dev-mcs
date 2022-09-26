@@ -14,9 +14,10 @@
 */
 void test_validate_my_username()
 {
-    /**
-     * TODO: Replace the line below with your code here as described above to verify your /conf/username.txt 
-     * config file and my_username() functions are setup properly
-     */
-    TEST_ASSERT_TRUE_MESSAGE(false,"AESD students, please fix me!");
+    char* pstr_malloc = malloc_username_from_conf_file(); // allocates memory for this string so need to free. 
+
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(my_username(), pstr_malloc, "FIXED: dev-mcs. The strings are the same");
+
+    if (pstr_malloc)
+    	free(pstr_malloc);
 }
