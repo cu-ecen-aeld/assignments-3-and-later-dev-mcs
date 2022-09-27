@@ -1,7 +1,8 @@
 binary=writer
 
+.PHONY:
 all: ${binary}
-	${CROSS_COMPILE}gcc -o ${binary} ${binary}.c  
+	${CROSS_COMPILE}gcc -Wall -o ${binary} ${binary}.c  
 
 .PHONY:
 clean:

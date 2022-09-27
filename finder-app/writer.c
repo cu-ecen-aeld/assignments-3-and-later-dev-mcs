@@ -7,6 +7,7 @@
 #include <string.h>
 #include <errno.h>
 
+// Just minimal error handling below. Could be improved...
 int main(int argc, char** argv)
 {
 	openlog(NULL, 0, LOG_USER);
@@ -23,8 +24,11 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
+	// Could loop over for short writes here but, in this instance,
+	// it's not part of the assignment.
 	if (write(fd, argv[2], strlen(argv[2])) == -1) 	{
 		syslog(LOG_ERR, "Could not write: %s", strerror(errno));
+		close(fd);
 		return 1;
 	}
 
@@ -36,7 +40,7 @@ int main(int argc, char** argv)
 	}
 
 	// Not actually required to close the syslog according to the man page
-	// assume this is handled by the kernel.
+	// but for completeness here...
 	closelog();
 
 	return 0;
