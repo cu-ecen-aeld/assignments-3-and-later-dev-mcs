@@ -13,6 +13,10 @@ FINDER_APP_DIR=$(realpath $(dirname $0))
 ARCH=arm64
 CROSS_COMPILE=aarch64-none-linux-gnu-
 
+# Get the sysroot.
+CC_SYSROOT=$(${CROSS_COMPILE}gcc --print-sysroot)
+echo ${CC_SYSROOT}
+
 if [ $# -lt 1 ]
 then
 	echo "Using default directory ${OUTDIR} for output"
@@ -80,7 +84,7 @@ ${CROSS_COMPILE}readelf -a ${OUTDIR}/rootfs/bin/busybox | grep "program interpre
 ${CROSS_COMPILE}readelf -a ${OUTDIR}/rootfs/bin/busybox | grep "Shared library"
 
 # TODO: Add library dependencies to rootfs
-cp /opt/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu/libc/lib64/{ld-2.31.so,libm-2.31.so,libresolv-2.31.so,libc-2.31.so}  ${OUTDIR}/rootfs/lib
+cp ${CC_SYSROOT}/lib64/{ld-2.31.so,libm-2.31.so,libresolv-2.31.so,libc-2.31.so}  ${OUTDIR}/rootfs/lib
 cd ${OUTDIR}/rootfs/lib
 ln -s ld-2.31.so ld-linux-aarch64.so.1
 ln -s libm-2.31.so libm.so.6
