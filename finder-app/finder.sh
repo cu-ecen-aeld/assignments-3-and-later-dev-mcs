@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Expected args: $1 - files path, $2 - search string text 
 if [ ! $# -eq 2 ]
