@@ -20,7 +20,7 @@
 #define DEBUG_AESD
 
 #define CON_BACKLOG 5
-#define FILE_NAME "/tmp/aesdsocketdata"
+#define FILE_NAME "/var/tmp/aesdsocketdata"
 #define RECV_BUFF_SIZE  (1 << 8)
 #define CREATE_DAEMON 1
 
