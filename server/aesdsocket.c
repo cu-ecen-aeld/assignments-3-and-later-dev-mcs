@@ -1,8 +1,3 @@
-// syslog
-// signals
-// forking
-// sockets
-
 #include <string.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -25,7 +20,7 @@
 #define DEBUG_AESD
 
 #define CON_BACKLOG 5
-#define FILE_NAME "/var/tmp/aesdsocketdata"
+#define FILE_NAME "/tmp/aesdsocketdata"
 #define RECV_BUFF_SIZE  (1 << 8)
 #define CREATE_DAEMON 1
 
