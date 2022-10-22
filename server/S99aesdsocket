@@ -1,0 +1,26 @@
+#!/bin/sh
+
+BIN_NAME=/usr/bin/aesdsocket
+BIN_OPTS="-d"
+
+case "$1" in
+        start)
+                echo "starting ${BIN_NAME}";
+                start-stop-daemon --start --startas ${BIN_NAME} -- ${BIN_OPTS}
+                ;;
+        stop)
+                echo "stopping daemon ${BIN_NAME}";
+                start-stop-daemon --stop -x ${BIN_NAME} -o 
+        ;;
+        restart)
+                echo "stopping daemon ${BIN_NAME}";
+                start-stop-daemon --stop -x ${BIN_NAME} -o
+                echo "starting ${BIN_NAME}";
+                start-stop-daemon --start --startas ${BIN_NAME} -- ${BIN_OPTS}
+                ;;
+        *)
+                echo "Usage ${0} {start|stop|restart}";
+                ;;
+esac
+
+exit 0;
