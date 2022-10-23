@@ -17,12 +17,11 @@
 #include <sys/stat.h>
 #include <linux/fs.h>
 
-#define DEBUG_AESD
-
 #define CON_BACKLOG 5
 #define FILE_NAME "/var/tmp/aesdsocketdata"
 #define RECV_BUFF_SIZE  (1 << 8)
 #define CREATE_DAEMON 1
+//#define USE_ADDRINFO
 
 static int filefd = 0;
 static int finish_loop = 0;
@@ -53,8 +52,6 @@ void signal_handler(int signum) {
 
 int main(int argc, char** argv) {
 
-	char* port_num = "9000";
-
 	// open syslog
 	openlog(0, 0, LOG_USER);
 
@@ -79,6 +76,10 @@ int main(int argc, char** argv) {
 		exit(EXIT_FAILURE);	
     }
 
+#ifdef USE_ADDRINFO
+
+	char* port_num = "9000";
+
 	struct addrinfo gai_hints = {0};
     gai_hints.ai_family = AF_INET;
     gai_hints.ai_socktype = SOCK_STREAM;
@@ -92,7 +93,6 @@ int main(int argc, char** argv) {
 		exit(EXIT_FAILURE);
 	}
 
-#ifdef DEBUG_AESD
 	struct addrinfo* p = 0;
     for (p = gai_res; p != 0; p = p->ai_next)
     {
@@ -102,10 +102,32 @@ int main(int argc, char** argv) {
         inet_ntop(sadin->sin_family, &(sadin->sin_addr), hip_buf, INET_ADDRSTRLEN);
         syslog(LOG_INFO, "Retrieved IP address: %s", hip_buf);
     }
-#endif
 
-	// Create the socket
 	int sockfd = socket(gai_res->ai_family, gai_res->ai_socktype, gai_res->ai_protocol);
+	if (-1 == sockfd) {
+        syslog(LOG_ERR, "socket: %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+	res = bind(sockfd, gai_res->ai_addr, gai_res->ai_addrlen);
+	if (-1 == res) {
+        syslog(LOG_ERR, "bind: %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+	if (gai_res->ai_addr->sa_family == AF_INET) {
+
+        struct sockaddr_in* sadin = (struct sockaddr_in*) (gai_res->ai_addr);
+        char hip_buf[INET_ADDRSTRLEN] = {0};
+        inet_ntop(AF_INET, &(sadin->sin_addr), hip_buf, INET_ADDRSTRLEN);
+        syslog(LOG_INFO, "Host IP address: %s", hip_buf);
+    } 
+    
+    // Free the host info.
+    freeaddrinfo(gai_res);
+
+#else
+	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (-1 == sockfd) {
 		syslog(LOG_ERR, "socket: %s", strerror(errno));
 		exit(EXIT_FAILURE);
@@ -124,23 +146,19 @@ int main(int argc, char** argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	res = bind(sockfd, gai_res->ai_addr, gai_res->ai_addrlen);
+	struct sockaddr_in addr_in;
+	memset(&addr_in, 0, sizeof(addr_in));
+	addr_in.sin_family = AF_INET;
+	addr_in.sin_addr.s_addr = INADDR_ANY;
+	addr_in.sin_port = htons(9000);
 
+	res = bind(sockfd, (struct sockaddr*) &addr_in, sizeof(addr_in));
 	if (-1 == res) {
 		syslog(LOG_ERR, "bind: %s", strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 
-	if (gai_res->ai_addr->sa_family == AF_INET) {
-
-		struct sockaddr_in* sadin = (struct sockaddr_in*) (gai_res->ai_addr);
-		char hip_buf[INET_ADDRSTRLEN] = {0};
-		inet_ntop(AF_INET, &(sadin->sin_addr), hip_buf, INET_ADDRSTRLEN);
-		syslog(LOG_INFO, "Host IP address: %s", hip_buf);
-    } 
-	
-	// Free the host info.
-	freeaddrinfo(gai_res);
+#endif
 
 #ifdef CREATE_DAEMON
 	if (is_daemon)
