@@ -16,15 +16,25 @@
 #include <malloc.h>
 #include <sys/stat.h>
 #include <linux/fs.h>
+#include <pthread.h>
 
 #define CON_BACKLOG 5
 #define FILE_NAME "/var/tmp/aesdsocketdata"
-#define RECV_BUFF_SIZE  (1 << 8)
-#define CREATE_DAEMON 1
-//#define USE_ADDRINFO
+#define RECV_BUFF_SIZE  (1 << 6)
+
+struct thread_data
+{   
+	pthread_t threadId;
+    int filefd;
+    int cfd;
+	char cip_buf[INET_ADDRSTRLEN];
+	int finished;
+};
+	
+
+void* thread_handle_accept(void* param);
 
 static int filefd = 0;
-static int finish_loop = 0;
 
 void signal_handler(int signum) {
 	if (signum == SIGTERM || SIGINT == signum) {
@@ -43,8 +53,6 @@ void signal_handler(int signum) {
 			}
 		}
 
-//		finish_loop = true;
-
 		// exit the application.
 		exit(EXIT_SUCCESS);
 	}
@@ -59,11 +67,9 @@ int main(int argc, char** argv) {
 	syslog(LOG_INFO, "***************************************");
 	syslog(LOG_INFO, "aesdsocket started");
 
-#ifdef CREATE_DAEMON
 	const int is_daemon = ((getopt(argc, argv, "d") == 'd') ? 1 : 0);
 	if (is_daemon)
 		syslog(LOG_INFO, "Will run as daemon");
-#endif
 
 	struct sigaction action = {0};
 	action.sa_handler = signal_handler;
@@ -72,11 +78,9 @@ int main(int argc, char** argv) {
 	int res = sigaction(SIGTERM, &action, 0);
 	
 	if (-1 == res) {
-        syslog(LOG_ERR, "sigaction: %s", strerror(errno));
+		perror("sigaction failed: ");
 		exit(EXIT_FAILURE);	
     }
-
-#ifdef USE_ADDRINFO
 
 	char* port_num = "9000";
 
@@ -89,7 +93,7 @@ int main(int argc, char** argv) {
 
 	res = getaddrinfo(0, port_num, &gai_hints, &gai_res);
 	if (0 != res) {
-		syslog(LOG_ERR, "getaddrinfo failed: %s", gai_strerror(res));
+		perror("getaddrinfo failed: ");
 		exit(EXIT_FAILURE);
 	}
 
@@ -105,13 +109,20 @@ int main(int argc, char** argv) {
 
 	int sockfd = socket(gai_res->ai_family, gai_res->ai_socktype, gai_res->ai_protocol);
 	if (-1 == sockfd) {
-        syslog(LOG_ERR, "socket: %s", strerror(errno));
+		perror("socket failed: ");
+        exit(EXIT_FAILURE);
+    }
+
+	int yes=1;
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1) {
+		perror("setsockopt failed: ");
         exit(EXIT_FAILURE);
     }
 
 	res = bind(sockfd, gai_res->ai_addr, gai_res->ai_addrlen);
 	if (-1 == res) {
-        syslog(LOG_ERR, "bind: %s", strerror(errno));
+		perror("bind failed: ");
         exit(EXIT_FAILURE);
     }
 
@@ -126,41 +137,6 @@ int main(int argc, char** argv) {
     // Free the host info.
     freeaddrinfo(gai_res);
 
-#else
-	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (-1 == sockfd) {
-		syslog(LOG_ERR, "socket: %s", strerror(errno));
-		exit(EXIT_FAILURE);
-	}
-
-	int yes=1;
-
-	// lose the pesky "Address already in use" error message
-	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1) {
-    	syslog(LOG_ERR, "setsockopt failed");
-    	exit(EXIT_FAILURE);
-	} 
-
-	if (-1 == sockfd) {
-		syslog(LOG_ERR, "socket: %s", strerror(errno));
-		exit(EXIT_FAILURE);
-	}
-
-	struct sockaddr_in addr_in;
-	memset(&addr_in, 0, sizeof(addr_in));
-	addr_in.sin_family = AF_INET;
-	addr_in.sin_addr.s_addr = INADDR_ANY;
-	addr_in.sin_port = htons(9000);
-
-	res = bind(sockfd, (struct sockaddr*) &addr_in, sizeof(addr_in));
-	if (-1 == res) {
-		syslog(LOG_ERR, "bind: %s", strerror(errno));
-		exit(EXIT_FAILURE);
-	}
-
-#endif
-
-#ifdef CREATE_DAEMON
 	if (is_daemon)
 	{
 		syslog(LOG_INFO, "Creating daemon");
@@ -196,116 +172,62 @@ int main(int argc, char** argv) {
 		dup(0); 					// stdout
 		dup(0);						// stderr
 	}
-#endif
 
 	// listen on the socket 
 	if ((res = listen(sockfd, CON_BACKLOG)) == -1) {
-		syslog(LOG_ERR, "Listen: %s", strerror(errno));
+		perror("listen failed: ");
 		exit(EXIT_FAILURE);
 	}
 
 	syslog(LOG_INFO, "listening on socket");
 
-	while (0 == finish_loop)
+	struct thread_data* thread_data_array[CON_BACKLOG] = {0};
+	//pthread_t threadId;
+	int thread_top = 0;
+
+	while (1)
 	{
-		char cip_buf[INET_ADDRSTRLEN] = {0};
-		struct sockaddr_storage c_addr_info = {0};
-    	socklen_t c_addr_info_sz = sizeof(struct sockaddr_storage);
-
-		int cfd = accept(sockfd, (struct sockaddr*) &c_addr_info, &c_addr_info_sz);
-
-		if (-1 == cfd) {
-			syslog(LOG_ERR, "accept: %s", strerror(errno));
-
-		} else {
-
-			struct sockaddr_in* cip =  (struct sockaddr_in*) &c_addr_info;
-			inet_ntop(c_addr_info.ss_family, &(cip->sin_addr), cip_buf, INET_ADDRSTRLEN);
-			syslog(LOG_INFO, "Accepted connection from %s", cip_buf);
-		}
-	
-		char* cr = 0;
-		int bytes_read = 0;
-		int cur_packet_size = 0;
-		char* packet_buf = 0;
-		do {
-			char readbuf[RECV_BUFF_SIZE + 1] = {0};
-			if ((bytes_read = recv(cfd, readbuf, RECV_BUFF_SIZE, 0)) == -1) {
-				syslog(LOG_ERR, "readv: %s", strerror(errno));
-				exit(EXIT_FAILURE);
-			}
-
-			if (bytes_read == 0)
-				break;
-
-			cur_packet_size += bytes_read;
-
-			// Create a buffer of the correct size.
-			//char* n_packet_buf = (char*) realloc(packet_buf, cur_packet_size + 1);
-			if (0 == packet_buf)
-				packet_buf = (char*) calloc(1, cur_packet_size + 1);
-			else {
-				char* tmp_buff = (char*) calloc(1, cur_packet_size + 1);
-				if (tmp_buff) {
-					strcpy(tmp_buff, packet_buf);
-					free(packet_buf);
-					syslog(LOG_INFO, "realloced");
-				}
-				packet_buf = tmp_buff;
-			}
-				
-			if (packet_buf == 0) {
-				syslog(LOG_ERR, "realloc failed: returned NULL (0)");
-				break;
-			}
-			
-			// Copy the read buffer into the (re)allocated buffer.
-			packet_buf = strcat(packet_buf, readbuf);
-
-			cr = strchr(readbuf, '\n');
-			if (cr) {
-				// we found a carriage return;
-				syslog(LOG_INFO, "cr found");
-					
-			}
-		}
-		while (!cr);
-			
-		syslog(LOG_INFO, "bytes_read: %d", cur_packet_size);
-
-		// open the file
-    	if ((filefd = open(FILE_NAME, O_RDWR | O_CREAT | O_APPEND, 0644)) == -1) {
-        	syslog(LOG_ERR, "open: %s", strerror(errno));
-        	exit(EXIT_FAILURE);
-    	}
-	
-		// append to the file
-		if (write(filefd, packet_buf, cur_packet_size) == -1) {
-			syslog(LOG_ERR, "write: %s", strerror(errno));
-		} 	
-		
-		// Free up memory
-        free(packet_buf);
-
-		char filebuf[RECV_BUFF_SIZE + 1] = {0};
-		lseek(filefd, 0, SEEK_SET);
-		while ((res = read(filefd, filebuf, RECV_BUFF_SIZE)) != 0)
-		{
-			syslog(LOG_ERR, "filebuffer: %s", filebuf);
-
-			if (send(cfd, filebuf, res, 0) == -1) {
-                syslog(LOG_ERR, "send: %s", strerror(errno));
-            }
-		}
-
-		if (close(filefd) == -1) {
-            syslog(LOG_ERR, "close: %s", strerror(errno));
+		struct thread_data* data = malloc(sizeof(struct thread_data));
+        if (!data)
             exit(EXIT_FAILURE);
+
+        memset(data->cip_buf, 0, INET_ADDRSTRLEN);
+        data->filefd = filefd;
+		data->finished = 0;
+
+        struct sockaddr_storage c_addr_info = {0};
+        socklen_t c_addr_info_sz = sizeof(struct sockaddr_storage);
+
+        data->cfd = accept(sockfd, (struct sockaddr*) &c_addr_info, &c_addr_info_sz);
+        if (-1 == data->cfd) {
+			perror("accept failed: ");
+
+        } else {
+
+            struct sockaddr_in* cip =  (struct sockaddr_in*) &c_addr_info;
+            inet_ntop(c_addr_info.ss_family, &(cip->sin_addr), data->cip_buf, INET_ADDRSTRLEN);
+            syslog(LOG_INFO, "Accepted connection from %s", data->cip_buf);
         }
 
-		close(cfd);
+		thread_data_array[thread_top] = data;
 
-		syslog(LOG_INFO, "Closed connection from %s", cip_buf);
+		pthread_create(&(thread_data_array[thread_top]->threadId), 0, &thread_handle_accept, data);
+		
+		++thread_top;
+
+		int i;
+		for (i = 0; i < thread_top; i++) {
+			if ((0 != thread_data_array[i]) && (1 == thread_data_array[i]->finished)) {
+
+				pthread_join(thread_data_array[i]->threadId, 0);
+
+				free(thread_data_array[i]);
+				
+				thread_data_array[i] = thread_data_array[thread_top];	
+				thread_data_array[thread_top] = 0;
+				thread_top--;
+			}
+		}
 	}
 
 	close(sockfd);
@@ -318,3 +240,64 @@ int main(int argc, char** argv) {
 	// all good.
 	exit(EXIT_SUCCESS);
 }
+
+void* thread_handle_accept(void* param) {
+
+	struct thread_data* data = (struct thread_data*) param;
+
+	if (!data)
+		return 0;
+
+	// open the file
+    if ((data->filefd = open(FILE_NAME, O_RDWR | O_CREAT | O_APPEND, 0644)) == -1) {
+		perror("open failed: ");
+        exit(EXIT_FAILURE);
+    }
+
+    do {
+		int bytes_read = 0;
+        char readbuf[RECV_BUFF_SIZE + 1] = {0};
+
+        if ((bytes_read = recv(data->cfd, readbuf, RECV_BUFF_SIZE, 0)) == -1) {
+			perror("recv failed: ");
+            exit(EXIT_FAILURE);
+        }
+
+        if (bytes_read == 0)
+        	break;
+
+        // append to the file
+       	if (write(data->filefd, readbuf, bytes_read) == -1) {
+			perror("accept failed: ");
+        }
+		
+		if (strchr(readbuf, '\n') != 0)
+        	break;
+	}
+    while (1);
+
+	int res = 0;
+    char filebuf[RECV_BUFF_SIZE + 1] = {0};
+    lseek(data->filefd, 0, SEEK_SET);
+    while ((res = read(data->filefd, filebuf, RECV_BUFF_SIZE)) != 0)
+    {   
+    	syslog(LOG_ERR, "filebuffer: %s", filebuf);
+
+        if (send(data->cfd, filebuf, res, 0) == -1) {
+			perror("send failed: ");
+        }
+    }
+
+    if (close(data->filefd) == -1) {
+		perror("close failed: ");
+        exit(EXIT_FAILURE);
+    }
+
+   	close(data->cfd);
+
+    syslog(LOG_INFO, "Closed connection from %s", data->cip_buf);
+
+	data->finished = 1;
+
+	return 0;
+}	
