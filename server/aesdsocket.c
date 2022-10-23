@@ -64,7 +64,6 @@ int main(int argc, char** argv) {
 	openlog(0, 0, LOG_USER);
 
 	// and we are off!
-	syslog(LOG_INFO, "***************************************");
 	syslog(LOG_INFO, "aesdsocket started");
 
 	const int is_daemon = ((getopt(argc, argv, "d") == 'd') ? 1 : 0);
@@ -96,16 +95,6 @@ int main(int argc, char** argv) {
 		perror("getaddrinfo failed: ");
 		exit(EXIT_FAILURE);
 	}
-
-	struct addrinfo* p = 0;
-    for (p = gai_res; p != 0; p = p->ai_next)
-    {
-        char hip_buf[INET6_ADDRSTRLEN] = {0};
-
-        struct sockaddr_in* sadin = (struct sockaddr_in*) (p->ai_addr);
-        inet_ntop(sadin->sin_family, &(sadin->sin_addr), hip_buf, INET_ADDRSTRLEN);
-        syslog(LOG_INFO, "Retrieved IP address: %s", hip_buf);
-    }
 
 	int sockfd = socket(gai_res->ai_family, gai_res->ai_socktype, gai_res->ai_protocol);
 	if (-1 == sockfd) {
@@ -152,7 +141,7 @@ int main(int argc, char** argv) {
 		}
 
 		// Create a new session.
-		if (setsid() == -1) {
+	/*	if (setsid() == -1) {
 			exit(EXIT_FAILURE);
 		}
 
@@ -171,6 +160,7 @@ int main(int argc, char** argv) {
 		open("/dev/null", O_RDWR); 	// stdin
 		dup(0); 					// stdout
 		dup(0);						// stderr
+	*/
 	}
 
 	// listen on the socket 
@@ -182,7 +172,6 @@ int main(int argc, char** argv) {
 	syslog(LOG_INFO, "listening on socket");
 
 	struct thread_data* thread_data_array[CON_BACKLOG] = {0};
-	//pthread_t threadId;
 	int thread_top = 0;
 
 	while (1)
@@ -268,7 +257,8 @@ void* thread_handle_accept(void* param) {
 
         // append to the file
        	if (write(data->filefd, readbuf, bytes_read) == -1) {
-			perror("accept failed: ");
+			perror("write failed: ");
+			exit(EXIT_FAILURE);
         }
 		
 		if (strchr(readbuf, '\n') != 0)
@@ -278,8 +268,10 @@ void* thread_handle_accept(void* param) {
 
 	int res = 0;
     char filebuf[RECV_BUFF_SIZE + 1] = {0};
-    lseek(data->filefd, 0, SEEK_SET);
-    while ((res = read(data->filefd, filebuf, RECV_BUFF_SIZE)) != 0)
+    if (lseek(data->filefd, 0, SEEK_SET) == -1)
+		perror("lseek failed: ");
+    
+	while ((res = read(data->filefd, filebuf, RECV_BUFF_SIZE)) != 0)
     {   
     	syslog(LOG_ERR, "filebuffer: %s", filebuf);
 
